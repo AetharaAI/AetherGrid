@@ -1,14 +1,17 @@
 """
 Embedding Worker for AetherGrid
-Processes messages from queue and generates vector embeddings.
+Processes messages from queue and generates vector embeddings using local or Cohere providers.
+
+Updated for local-first embeddings - no OpenAI dependency.
 """
 
 import asyncio
-from openai import AsyncOpenAI
-from typing import List, Dict, Any, Optional
-import tiktoken
+from typing import List, Dict, Any
 import logging
 from datetime import datetime
+
+from src.embeddings import get_embedding_provider_with_fallback
+from src.config.embedding_settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,6 @@ class EmbeddingWorker:
         weaviate_manager,
         mongo_manager,
         postgres_manager,
-        openai_api_key: str,
         batch_size: int = 50
     ):
         """
@@ -33,21 +35,47 @@ class EmbeddingWorker:
             weaviate_manager: WeaviateManager for vector storage
             mongo_manager: MongoManager for message updates
             postgres_manager: PostgresManager for metadata updates
-            openai_api_key: OpenAI API key for embeddings
             batch_size: Batch size for processing
         """
         self.redis = redis_manager
         self.weaviate = weaviate_manager
         self.mongo = mongo_manager
         self.postgres = postgres_manager
-        self.openai = AsyncOpenAI(api_key=openai_api_key)
         self.batch_size = batch_size
-        self.encoder = tiktoken.get_encoding("cl100k_base")
+
+        # Load embedding settings
+        self.settings = get_settings()
+
+        # Initialize embedding providers (primary and fallback)
+        self.primary_provider, self.fallback_provider = get_embedding_provider_with_fallback()
+
+        # Initialize the primary provider
+        self.primary_provider.initialize()
+        logger.info(
+            f"Primary embedding provider: {self.primary_provider.provider_name} "
+            f"(model: {self.primary_provider.model_name}, "
+            f"dimensions: {self.primary_provider.get_dimensions()})"
+        )
+
+        # Initialize fallback if available
+        if self.fallback_provider:
+            try:
+                self.fallback_provider.initialize()
+                logger.info(
+                    f"Fallback provider: {self.fallback_provider.provider_name} "
+                    f"(model: {self.fallback_provider.model_name})"
+                )
+            except Exception as e:
+                logger.warning(f"Fallback provider initialization failed: {e}")
+                self.fallback_provider = None
+
         self.is_running = False
         self.stats = {
             "messages_processed": 0,
             "chunks_created": 0,
             "errors": 0,
+            "primary_used": 0,
+            "fallback_used": 0,
             "started_at": None
         }
 
@@ -86,8 +114,8 @@ class EmbeddingWorker:
             content = message["content"]
             message_id = message["message_id"]
 
-            # Chunk if needed (>8000 tokens)
-            chunks = self._chunk_text(content)
+            # Chunk if needed (>8000 characters - simplified from tokens)
+            chunks = self._chunk_text(content, max_chars=8000)
 
             logger.info(
                 f"📝 Processing {len(chunks)} chunk(s) for message {message_id[:8]}..."
@@ -96,6 +124,13 @@ class EmbeddingWorker:
             # Process each chunk
             for i, chunk in enumerate(chunks):
                 try:
+                    # Generate embedding for this chunk
+                    vector = await self._generate_embedding(chunk)
+
+                    if not vector:
+                        logger.error(f"Failed to generate embedding for chunk {i}")
+                        continue
+
                     # Create fragment
                     fragment = {
                         "content": chunk,
@@ -110,14 +145,15 @@ class EmbeddingWorker:
                         "topic": self._extract_topic(chunk),
                         "task_type": self._classify_task(chunk),
                         "complexity": self._estimate_complexity(chunk),
-                        "tokens": len(self.encoder.encode(chunk))
+                        "tokens": len(chunk.split())  # Simple word count
                     }
 
-                    # Store in Weaviate (it will generate embeddings automatically)
+                    # Store in Weaviate with vector
                     uuid = await asyncio.get_event_loop().run_in_executor(
                         None,
                         self.weaviate.store_fragment,
-                        fragment
+                        fragment,
+                        vector
                     )
 
                     self.stats["chunks_created"] += 1
@@ -150,20 +186,58 @@ class EmbeddingWorker:
             logger.error(f"Error processing message: {e}")
             self.stats["errors"] += 1
 
-    def _chunk_text(self, text: str, max_tokens: int = 8000) -> List[str]:
+    async def _generate_embedding(self, text: str) -> List[float]:
+        """
+        Generate embedding for text using primary provider with fallback
+
+        Args:
+            text: Text to embed
+
+        Returns:
+            Embedding vector or None on failure
+        """
+        # Try primary provider
+        try:
+            vector = await asyncio.get_event_loop().run_in_executor(
+                None,
+                self.primary_provider.generate_embedding,
+                text
+            )
+            self.stats["primary_used"] += 1
+            return vector
+
+        except Exception as e:
+            logger.warning(f"Primary provider failed: {e}")
+
+            # Try fallback if available
+            if self.fallback_provider:
+                try:
+                    logger.info("Using fallback provider...")
+                    vector = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        self.fallback_provider.generate_embedding,
+                        text
+                    )
+                    self.stats["fallback_used"] += 1
+                    return vector
+
+                except Exception as fallback_error:
+                    logger.error(f"Fallback provider also failed: {fallback_error}")
+
+            return None
+
+    def _chunk_text(self, text: str, max_chars: int = 8000) -> List[str]:
         """
         Split text into chunks at semantic boundaries
 
         Args:
             text: Text to chunk
-            max_tokens: Maximum tokens per chunk
+            max_chars: Maximum characters per chunk
 
         Returns:
             List of text chunks
         """
-        tokens = self.encoder.encode(text)
-
-        if len(tokens) <= max_tokens:
+        if len(text) <= max_chars:
             return [text]
 
         # Simple sentence-based chunking
@@ -175,16 +249,16 @@ class EmbeddingWorker:
         sentences = text.split('. ')
 
         for sentence in sentences:
-            sentence_tokens = len(self.encoder.encode(sentence))
+            sentence_length = len(sentence)
 
-            if current_length + sentence_tokens > max_tokens and current_chunk:
+            if current_length + sentence_length > max_chars and current_chunk:
                 # Save current chunk and start new one
                 chunks.append('. '.join(current_chunk) + '.')
                 current_chunk = [sentence]
-                current_length = sentence_tokens
+                current_length = sentence_length
             else:
                 current_chunk.append(sentence)
-                current_length += sentence_tokens
+                current_length += sentence_length
 
         # Add remaining chunk
         if current_chunk:
@@ -255,7 +329,7 @@ class EmbeddingWorker:
             Complexity score (0-1)
         """
         # Simple heuristic: longer + more technical = more complex
-        token_count = len(self.encoder.encode(text))
+        word_count = len(text.split())
 
         technical_terms = sum(
             1 for word in [
@@ -267,7 +341,7 @@ class EmbeddingWorker:
         )
 
         # Normalize complexity score
-        length_score = min(1.0, token_count / 5000) * 0.7
+        length_score = min(1.0, word_count / 1000) * 0.7
         technical_score = min(1.0, technical_terms / 10) * 0.3
 
         complexity = length_score + technical_score
@@ -276,11 +350,17 @@ class EmbeddingWorker:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get worker statistics"""
+        uptime_seconds = 0
+        if self.stats["started_at"]:
+            uptime_seconds = (
+                datetime.utcnow() -
+                datetime.fromisoformat(self.stats["started_at"])
+            ).total_seconds()
+
         return {
             **self.stats,
-            "uptime_seconds": (
-                (datetime.utcnow() - datetime.fromisoformat(self.stats["started_at"])).total_seconds()
-                if self.stats["started_at"] else 0
-            ),
-            "queue_length": asyncio.run(self.redis.get_queue_length("processing:queue"))
+            "uptime_seconds": uptime_seconds,
+            "queue_length": 0,  # Will be set by async call
+            "primary_provider": self.primary_provider.provider_name,
+            "fallback_provider": self.fallback_provider.provider_name if self.fallback_provider else None
         }

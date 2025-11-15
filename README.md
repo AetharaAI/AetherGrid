@@ -39,7 +39,7 @@ AetherGrid/
 - **Docker & Docker Compose** (for databases)
 - **Python 3.11+**
 - **uv** (Fast Python package manager - [install here](https://github.com/astral-sh/uv))
-- **OpenAI API Key** (for embeddings)
+- **NO API KEYS REQUIRED!** 🎉 Works completely offline with local embeddings
 
 ### Installation
 
@@ -54,10 +54,11 @@ AetherGrid/
    uv sync --extra dev
    ```
 
-3. **Configure environment**
+3. **Configure environment** (OPTIONAL - works without!)
    ```bash
    cp .env.example .env
-   # Edit .env and add your OPENAI_API_KEY
+   # NO configuration needed for local embeddings!
+   # Optional: Add COHERE_API_KEY if you want Cohere embeddings instead
    ```
 
 4. **Start the system**
@@ -65,7 +66,74 @@ AetherGrid/
    ./scripts/start.sh
    ```
 
-That's it! AetherGrid is now running.
+That's it! AetherGrid is now running with **FREE local embeddings** - no API costs!
+
+## 🔐 Privacy-First Embeddings
+
+**AetherGrid uses LOCAL embeddings by default** - your data NEVER leaves your machine!
+
+### Why Not OpenAI?
+
+- ❌ **Costs money** ($0.0001 per 1K tokens adds up fast)
+- ❌ **Your IP goes to OpenAI** (they log everything)
+- ❌ **Requires internet** (can't work offline)
+- ❌ **Vendor lock-in** (what if they raise prices?)
+- ❌ **Privacy concerns** (your conversations leave your control)
+
+### Why Local Embeddings?
+
+- ✅ **100% FREE** - No API costs ever
+- ✅ **100% PRIVATE** - Your data never leaves your machine
+- ✅ **Works OFFLINE** - No internet required after model download
+- ✅ **GPU Accelerated** - Uses your GPU if available
+- ✅ **No Vendor Lock-in** - You own your infrastructure
+- ✅ **Faster** - No network latency
+
+### Embedding Provider Options
+
+**PRIMARY (Default): Local Embeddings**
+- Model: `all-mpnet-base-v2` (sentence-transformers)
+- Dimensions: 768
+- Speed: ~500 texts/second on CPU, ~5000/s on GPU
+- Quality: Excellent for most use cases
+- Cost: $0 forever
+
+**FALLBACK (Optional): Cohere**
+- Models: `embed-english-v3.0` or `embed-multilingual-v3.0`
+- Dimensions: 1024
+- Speed: API-dependent
+- Quality: Production-grade
+- Cost: Pay-per-use (set COHERE_API_KEY to enable)
+
+### Switching Providers
+
+Edit `.env`:
+```bash
+# Use local embeddings (default, no API key needed)
+PRIMARY_EMBEDDING_PROVIDER=local
+LOCAL_MODEL_NAME=all-mpnet-base-v2
+VECTOR_DIMENSIONS=768
+
+# OR use Cohere (requires API key)
+PRIMARY_EMBEDDING_PROVIDER=cohere
+COHERE_API_KEY=your-key-here
+COHERE_MODEL_NAME=embed-english-v3.0
+VECTOR_DIMENSIONS=1024
+
+# Enable automatic fallback
+FALLBACK_ENABLED=true
+```
+
+### Available Local Models
+
+| Model | Dimensions | Speed | Use Case |
+|-------|-----------|-------|----------|
+| `all-mpnet-base-v2` ⭐ | 768 | Fast | Best overall quality (default) |
+| `all-MiniLM-L6-v2` | 384 | Fastest | Speed-optimized |
+| `paraphrase-multilingual-mpnet-base-v2` | 768 | Fast | Multilingual support |
+| `multi-qa-mpnet-base-dot-v1` | 768 | Fast | Question-answering optimized |
+
+Models auto-download to `~/.cache/huggingface` on first use.
 
 ## 📡 API Endpoints
 
@@ -360,7 +428,9 @@ This is the foundation of AetherPro's AI infrastructure. Contributions welcome!
 
 Built with:
 - **Weaviate** - Vector database
-- **OpenAI** - Embedding models
+- **sentence-transformers** - Local embedding models (HuggingFace)
+- **Cohere** - Optional high-quality embeddings
+- **PyTorch** - Deep learning framework
 - **FastAPI** - API framework
 - **MongoDB** - Document storage
 - **PostgreSQL** - Relational data

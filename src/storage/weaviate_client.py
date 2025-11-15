@@ -1,6 +1,8 @@
 """
 Weaviate Client for AetherGrid
 Manages all vector database operations for storing and querying intelligence fragments.
+
+Updated for local-first embeddings - no OpenAI dependency.
 """
 
 import weaviate
@@ -16,21 +18,25 @@ logger = logging.getLogger(__name__)
 class WeaviateManager:
     """Manages all Weaviate vector database operations for AetherGrid"""
 
-    def __init__(self, url: str = None, openai_api_key: str = None):
+    def __init__(self, url: str = None, vector_dimensions: int = None):
+        """
+        Initialize Weaviate client
+
+        Args:
+            url: Weaviate URL (default: from env or localhost:8101)
+            vector_dimensions: Vector dimensions (default: from env or 768)
+        """
         self.url = url or os.getenv("WEAVIATE_URL", "http://localhost:8101")
-        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        self.vector_dimensions = vector_dimensions or int(os.getenv("VECTOR_DIMENSIONS", "768"))
 
-        if not self.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required for Weaviate vectorization")
-
-        # Connect to Weaviate
+        # Connect to Weaviate (no API keys needed - we provide vectors directly)
         self.client = weaviate.connect_to_local(
             host=self.url.replace("http://", "").replace("https://", "").split(":")[0],
-            port=int(self.url.split(":")[-1]) if ":" in self.url else 8080,
-            headers={"X-OpenAI-Api-Key": self.openai_api_key}
+            port=int(self.url.split(":")[-1]) if ":" in self.url else 8080
         )
 
         logger.info(f"Connected to Weaviate at {self.url}")
+        logger.info(f"Using vector dimensions: {self.vector_dimensions}")
         self._ensure_schema()
 
     def _ensure_schema(self):
@@ -43,74 +49,61 @@ class WeaviateManager:
                 return
 
             # Create the collection with schema
+            # Use "none" vectorizer - we'll provide vectors directly
             self.collection = self.client.collections.create(
                 name="IntelligenceFragment",
                 description="A fragment of AI intelligence from conversations",
-                vectorizer_config=Configure.Vectorizer.text2vec_openai(
-                    model="text-embedding-3-small",
-                    dimensions=1536,
-                    vectorize_collection_name=False
-                ),
+                vectorizer_config=Configure.Vectorizer.none(),  # No auto-vectorization
                 properties=[
                     Property(
                         name="content",
                         data_type=DataType.TEXT,
-                        description="The actual text content",
-                        vectorize_property_name=False,
-                        skip_vectorization=False
+                        description="The actual text content"
                     ),
                     Property(
                         name="conversationId",
                         data_type=DataType.TEXT,
-                        description="UUID of the parent conversation",
-                        skip_vectorization=True
+                        description="UUID of the parent conversation"
                     ),
                     Property(
                         name="messageId",
                         data_type=DataType.TEXT,
-                        description="UUID of the specific message",
-                        skip_vectorization=True
+                        description="UUID of the specific message"
                     ),
                     Property(
                         name="timestamp",
                         data_type=DataType.DATE,
-                        description="When this intelligence was captured",
-                        skip_vectorization=True
+                        description="When this intelligence was captured"
                     ),
                     Property(
                         name="sourceModel",
                         data_type=DataType.TEXT,
-                        description="Which AI model generated this",
-                        skip_vectorization=True
+                        description="Which AI model generated this"
                     ),
                     Property(
                         name="topic",
                         data_type=DataType.TEXT,
-                        description="Main topic/category",
-                        skip_vectorization=True
+                        description="Main topic/category"
                     ),
                     Property(
                         name="taskType",
                         data_type=DataType.TEXT,
-                        description="Type of task (coding, writing, analysis, etc)",
-                        skip_vectorization=True
+                        description="Type of task (coding, writing, analysis, etc)"
                     ),
                     Property(
                         name="complexity",
                         data_type=DataType.NUMBER,
-                        description="Complexity score 0-1",
-                        skip_vectorization=True
+                        description="Complexity score 0-1"
                     ),
                     Property(
                         name="tokensUsed",
                         data_type=DataType.INT,
-                        description="Token count for this fragment",
-                        skip_vectorization=True
+                        description="Token count for this fragment"
                     )
                 ]
             )
 
-            logger.info("✓ Created IntelligenceFragment collection with schema")
+            logger.info(f"✓ Created IntelligenceFragment collection ({self.vector_dimensions}D vectors)")
 
         except Exception as e:
             logger.error(f"Error ensuring schema: {e}")
@@ -120,18 +113,28 @@ class WeaviateManager:
             else:
                 raise
 
-    def store_fragment(self, fragment: Dict[str, Any]) -> str:
+    def store_fragment(self, fragment: Dict[str, Any], vector: List[float] = None) -> str:
         """
-        Store an intelligence fragment and return its UUID
+        Store an intelligence fragment with its vector
 
         Args:
             fragment: Dictionary with keys: content, conversation_id, message_id,
                      timestamp, source_model, and optional: topic, task_type,
                      complexity, tokens
+            vector: Pre-computed embedding vector (required!)
 
         Returns:
             UUID of the stored fragment
         """
+        if vector is None:
+            raise ValueError("vector is required - must provide pre-computed embedding")
+
+        if len(vector) != self.vector_dimensions:
+            raise ValueError(
+                f"Vector dimension mismatch: expected {self.vector_dimensions}, "
+                f"got {len(vector)}"
+            )
+
         try:
             data_object = {
                 "content": fragment["content"],
@@ -145,7 +148,11 @@ class WeaviateManager:
                 "tokensUsed": fragment.get("tokens", 0)
             }
 
-            uuid = self.collection.data.insert(properties=data_object)
+            uuid = self.collection.data.insert(
+                properties=data_object,
+                vector=vector  # Provide the vector directly
+            )
+
             logger.debug(f"Stored fragment {uuid}")
             return str(uuid)
 
@@ -155,16 +162,16 @@ class WeaviateManager:
 
     def semantic_search(
         self,
-        query: str,
+        query_vector: List[float],
         limit: int = 10,
         filters: Optional[Dict] = None,
         min_certainty: float = 0.7
     ) -> List[Dict]:
         """
-        Search for similar intelligence fragments
+        Search for similar intelligence fragments using vector
 
         Args:
-            query: Search query text
+            query_vector: Query embedding vector (pre-computed!)
             limit: Maximum number of results
             filters: Optional filters (sourceModel, taskType, etc.)
             min_certainty: Minimum similarity threshold (0-1)
@@ -172,10 +179,16 @@ class WeaviateManager:
         Returns:
             List of matching fragments with metadata
         """
+        if len(query_vector) != self.vector_dimensions:
+            raise ValueError(
+                f"Query vector dimension mismatch: expected {self.vector_dimensions}, "
+                f"got {len(query_vector)}"
+            )
+
         try:
-            # Build the query
-            query_builder = self.collection.query.near_text(
-                query=query,
+            # Build the query using near_vector (not near_text)
+            query_builder = self.collection.query.near_vector(
+                near_vector=query_vector,
                 limit=limit,
                 return_metadata=MetadataQuery(certainty=True, distance=True)
             )
@@ -217,7 +230,8 @@ class WeaviateManager:
 
             return {
                 "total_fragments": aggregate.total_count,
-                "collection_name": "IntelligenceFragment"
+                "collection_name": "IntelligenceFragment",
+                "vector_dimensions": self.vector_dimensions
             }
         except Exception as e:
             logger.error(f"Error getting stats: {e}")

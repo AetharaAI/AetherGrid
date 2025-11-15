@@ -9,7 +9,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "weaviate-client>=4.18.0",
-    "openai>=2.8.0",
+    "sentence-transformers>=2.2.0",
+    "cohere>=4.0.0",
+    "torch>=2.0.0",
     "psycopg2-binary>=2.9.11",
     "pymongo>=4.15.4",
     "redis>=7.0.1",
@@ -17,7 +19,6 @@ dependencies = [
     "uvicorn>=0.38.0",
     "pydantic>=2.12.4",
     "python-dotenv>=1.2.1",
-    "tiktoken>=0.12.0",
     "aioredis>=2.0.1",
 ]
 

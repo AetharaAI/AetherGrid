@@ -67,7 +67,7 @@ class AetherGrid:
             # Weaviate
             self.weaviate = WeaviateManager(
                 url=os.getenv("WEAVIATE_URL"),
-                openai_api_key=os.getenv("OPENAI_API_KEY")
+                vector_dimensions=int(os.getenv("VECTOR_DIMENSIONS", "768"))
             )
 
             # MongoDB
@@ -104,8 +104,7 @@ class AetherGrid:
                 weaviate_manager=self.weaviate,
                 mongo_manager=self.mongo,
                 postgres_manager=self.postgres,
-                openai_api_key=os.getenv("OPENAI_API_KEY"),
-                batch_size=int(os.getenv("PROCESSING_BATCH_SIZE", 50))
+                batch_size=int(os.getenv("PROCESSING_BATCH_SIZE", "50"))
             )
 
             # Claude Adapter
@@ -245,14 +244,10 @@ def main():
     logger.info("  Version 1.0.0")
     logger.info("=" * 60)
 
-    # Check required environment variables
-    required_vars = ["OPENAI_API_KEY"]
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
-
-    if missing_vars:
-        logger.error(f"❌ Missing required environment variables: {missing_vars}")
-        logger.error("Please set them in .env file or environment")
-        sys.exit(1)
+    # No required API keys! AetherGrid works with local embeddings by default.
+    # Optional: COHERE_API_KEY for Cohere embeddings
+    # Optional: ANTHROPIC_API_KEY for Claude adapter features
+    logger.info("🔓 No API keys required - running with local embeddings")
 
     # Run the application
     try:
