@@ -38,7 +38,7 @@ AetherGrid/
 
 - **Docker & Docker Compose** (for databases)
 - **Python 3.11+**
-- **Poetry** (Python package manager)
+- **uv** (Fast Python package manager - [install here](https://github.com/astral-sh/uv))
 - **OpenAI API Key** (for embeddings)
 
 ### Installation
@@ -51,7 +51,7 @@ AetherGrid/
 
 2. **Install dependencies**
    ```bash
-   poetry install
+   uv sync --extra dev
    ```
 
 3. **Configure environment**
@@ -304,18 +304,18 @@ curl http://localhost:8100/api/health | jq .
 
 ### Run Tests
 ```bash
-poetry run pytest
+uv run pytest
 ```
 
 ### Code Formatting
 ```bash
-poetry run black src/
-poetry run ruff check src/
+uv run black src/
+uv run ruff check src/
 ```
 
 ### Type Checking
 ```bash
-poetry run mypy src/
+uv run mypy src/
 ```
 
 ## 🚦 Production Considerations

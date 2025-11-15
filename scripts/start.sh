@@ -72,4 +72,4 @@ echo "🚀 Starting AetherGrid application..."
 echo ""
 
 # Start AetherGrid
-poetry run python main.py
+uv run python main.py

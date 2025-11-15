@@ -1,36 +1,52 @@
 [project]
 name = "aethergrid"
 version = "0.1.0"
-description = ""
+description = "Collective AI Intelligence System - Capture, vectorize, and share knowledge across AI models"
 authors = [
-    {name = "Claude",email = "noreply@anthropic.com"}
+    {name = "AetharaAI", email = "noreply@aethara.ai"}
 ]
 readme = "README.md"
-requires-python = "^3.11"
+requires-python = ">=3.11"
 dependencies = [
-    "weaviate-client (>=4.18.0,<5.0.0)",
-    "openai (>=2.8.0,<3.0.0)",
-    "psycopg2-binary (>=2.9.11,<3.0.0)",
-    "pymongo (>=4.15.4,<5.0.0)",
-    "redis (>=7.0.1,<8.0.0)",
-    "fastapi (>=0.121.2,<0.122.0)",
-    "uvicorn (>=0.38.0,<0.39.0)",
-    "pydantic (>=2.12.4,<3.0.0)",
-    "python-dotenv (>=1.2.1,<2.0.0)",
-    "tiktoken (>=0.12.0,<0.13.0)",
-    "aioredis (>=2.0.1,<3.0.0)"
+    "weaviate-client>=4.18.0",
+    "openai>=2.8.0",
+    "psycopg2-binary>=2.9.11",
+    "pymongo>=4.15.4",
+    "redis>=7.0.1",
+    "fastapi>=0.121.2",
+    "uvicorn>=0.38.0",
+    "pydantic>=2.12.4",
+    "python-dotenv>=1.2.1",
+    "tiktoken>=0.12.0",
+    "aioredis>=2.0.1",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.3.0",
+    "black>=25.11.0",
+    "ruff>=0.14.5",
+    "mypy>=1.18.2",
+]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[dependency-groups]
-dev = [
-    "pytest (>=9.0.1,<10.0.0)",
-    "pytest-asyncio (>=1.3.0,<2.0.0)",
-    "black (>=25.11.0,<26.0.0)",
-    "ruff (>=0.14.5,<0.15.0)",
-    "mypy (>=1.18.2,<2.0.0)"
-]
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
